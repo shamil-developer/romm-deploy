@@ -1,0 +1,51 @@
+name: romm-deploy
+
+services:
+  romm:
+    image: rommapp/romm:${ROMM_VERSION}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ROMM_PORT}:8080"
+    environment:
+      DB_HOST: romm-db
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWD: ${DB_PASSWD}
+      ROMM_AUTH_SECRET_KEY: ${ROMM_AUTH_SECRET_KEY}
+    volumes:
+      - type: bind
+        source: ${ROMM_LIBRARY_PATH}
+        target: /romm/library
+        bind:
+          create_host_path: false
+      - resources:/romm/resources
+      - assets:/romm/assets
+      - config:/romm/config
+      - redis-data:/redis-data
+    depends_on:
+      romm-db:
+        condition: service_healthy
+
+  romm-db:
+    image: mariadb:${MARIADB_VERSION}
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWD}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWD}
+    volumes:
+      - database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  database:
+  resources:
+  assets:
+  config:
+  redis-data:
