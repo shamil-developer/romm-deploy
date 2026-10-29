@@ -6,10 +6,72 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: romm-production
+  cancel-in-progress: false
+
 jobs:
   prepare:
-    name: "🐳 Install Docker and prepare directories"
-    uses: ./.github/workflows/run-ansible.yml
-    with:
-      operation: environment
-    secrets: inherit
+    name: "🐳 Prepare environment"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: "📥 Checkout configuration"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: "🔐 SSH · 📦 Transfer · ▶️ Ansible"
+        shell: bash
+        env:
+          PLAYBOOK_OPERATION: environment
+          CONTAINER_ACTION: ''
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          ROMM_LIBRARY_PATH: ${{ vars.ROMM_LIBRARY_PATH }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          echo '::group::🔎 Validate inputs and settings'
+          for field in SSH_HOST SSH_PORT SSH_USER DEPLOY_PATH SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            test -n "${!field}" || { echo "Missing $field" >&2; exit 1; }
+          done
+          # DEPLOY_PATH is used in remote shell commands; allow only a plain absolute path.
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$ ]] || { echo 'Invalid DEPLOY_PATH' >&2; exit 1; }
+          echo '::endgroup::'
+          echo '::group::🔐 Configure SSH'
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/romm-key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/romm-known-hosts"
+          trap 'rm -f "$RUNNER_TEMP/romm-key" "$RUNNER_TEMP/romm-known-hosts"' EXIT
+          ssh_command=(ssh -i "$RUNNER_TEMP/romm-key" -p "$SSH_PORT"
+            -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$RUNNER_TEMP/romm-known-hosts" "$SSH_USER@$SSH_HOST")
+          echo '::endgroup::'
+          echo '::group::📦 Transfer configuration'
+          tar -cf - compose.yml compose.prod.yml "ansible/$PLAYBOOK_OPERATION.yml" | "${ssh_command[@]}" \
+            "set -e; root=''; [ \"\$(id -u)\" = 0 ] || root='sudo -n';
+             \$root install -d -m 755 '$DEPLOY_PATH';
+             \$root tar --no-same-owner --no-same-permissions -xf - -C '$DEPLOY_PATH'"
+          echo '::endgroup::'
+          echo '::group::▶️ Run Ansible on the server'
+          # JSON goes straight through encrypted SSH stdin, never into a variables file or argv.
+          python3 - <<'PY' | "${ssh_command[@]}" \
+            "set -e; root=''; [ \"\$(id -u)\" = 0 ] || root='sudo -n';
+             command -v ansible-playbook >/dev/null || { echo 'Run Install Ansible first.' >&2; exit 1; };
+             \$root ansible-playbook -i localhost, -c local '$DEPLOY_PATH/ansible/$PLAYBOOK_OPERATION.yml' --extra-vars @/dev/stdin"
+          import json
+          import os
+          fields = ('ROMM_LIBRARY_PATH',)
+          for key in fields:
+              if not os.environ.get(key):
+                  raise SystemExit('Missing ' + key)
+          print(json.dumps({'deploy_path': os.environ['DEPLOY_PATH'],
+                            'container_action': os.environ['CONTAINER_ACTION'],
+                            'romm_env': {key: os.environ[key] for key in fields}}))
+          PY
+          echo '::endgroup::'
+          printf '### ✅ %s %s completed\n' "$PLAYBOOK_OPERATION" "$CONTAINER_ACTION" >> "$GITHUB_STEP_SUMMARY"
