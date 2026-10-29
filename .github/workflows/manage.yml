@@ -77,11 +77,14 @@ jobs:
              \$root tar --no-same-owner --no-same-permissions -xf - -C '$DEPLOY_PATH'"
           echo '::endgroup::'
           echo '::group::▶️ Run Ansible on the server'
-          # JSON goes straight through encrypted SSH stdin, never into a variables file or argv.
+          # JSON goes through the encrypted SSH channel into a temporary file on the server.
           python3 - <<'PY' | "${ssh_command[@]}" \
             "set -e; root=''; [ \"\$(id -u)\" = 0 ] || root='sudo -n';
              command -v ansible-playbook >/dev/null || { echo 'Run Install Ansible first.' >&2; exit 1; };
-             \$root ansible-playbook -i localhost, -c local '$DEPLOY_PATH/ansible/$PLAYBOOK_OPERATION.yml' --extra-vars @/dev/stdin"
+             vars_file=\$(mktemp)
+             cat > \"\$vars_file\"
+             \$root ansible-playbook -i localhost, -c local '$DEPLOY_PATH/ansible/$PLAYBOOK_OPERATION.yml' --extra-vars @\"\$vars_file\"
+             rm -f \"\$vars_file\""
           import json
           import os
           fields = ('ROMM_LIBRARY_PATH', 'ROMM_PORT', 'ROMM_VERSION', 'MARIADB_VERSION',
