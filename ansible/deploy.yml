@@ -21,11 +21,11 @@
           - romm_env.ROMM_PORT | int < 65536
           - romm_env.ROMM_AUTH_SECRET_KEY | length >= 32
           - container_action in ['deploy', 'start', 'stop', 'restart']
-      no_log: true
+      no_log: false
 
     - name: "🔐 Run Compose with secrets only in memory"
       environment: "{{ romm_env }}"
-      no_log: true
+      no_log: false
       block:
         - name: "🔎 Validate production Compose"
           ansible.builtin.command:
