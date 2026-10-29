@@ -1,0 +1,55 @@
+name: "🔧 1. Install Ansible"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: romm-production
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: "🔧 Check and install Ansible on the server"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: "🔐 SSH · 🔧 Install Ansible"
+        shell: bash
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ vars.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for field in SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            test -n "${!field}" || { echo "Missing $field" >&2; exit 1; }
+          done
+          echo '::group::🔐 Configure SSH'
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/romm-key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/romm-known-hosts"
+          trap 'rm -f "$RUNNER_TEMP/romm-key" "$RUNNER_TEMP/romm-known-hosts"' EXIT
+          echo '::endgroup::'
+          echo '::group::🔧 Check and install Ansible on the server'
+          ssh -i "$RUNNER_TEMP/romm-key" -p "$SSH_PORT" \
+            -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/romm-known-hosts" \
+            "$SSH_USER@$SSH_HOST" \
+            'if [ "$(id -u)" = 0 ]; then exec sh -s; else exec sudo -n sh -s; fi' <<'REMOTE'
+          set -eu
+          . /etc/os-release
+          case "$ID" in ubuntu|debian) ;; *) echo 'Ubuntu or Debian is required.' >&2; exit 1;; esac
+          if ! command -v ansible-playbook >/dev/null 2>&1; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y ansible-core
+          fi
+          ansible-playbook --version
+          REMOTE
+          echo '::endgroup::'
+          echo '### ✅ Ansible is ready on the server' >> "$GITHUB_STEP_SUMMARY"

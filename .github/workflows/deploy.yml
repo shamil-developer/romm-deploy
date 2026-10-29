@@ -1,0 +1,16 @@
+name: "🚀 3. Deploy RomM"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: "🚀 Deploy or update"
+    uses: ./.github/workflows/run-ansible.yml
+    with:
+      operation: deploy
+      container_action: deploy
+    secrets: inherit

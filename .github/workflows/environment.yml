@@ -1,0 +1,15 @@
+name: "🐳 2. Prepare environment"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: "🐳 Install Docker and prepare directories"
+    uses: ./.github/workflows/run-ansible.yml
+    with:
+      operation: environment
+    secrets: inherit

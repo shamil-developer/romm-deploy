@@ -1,0 +1,82 @@
+- name: "🚀 Deploy or manage RomM"
+  hosts: localhost
+  gather_facts: false
+  vars:
+    compose_command:
+      - docker
+      - compose
+      - --env-file
+      - /dev/null
+      - -f
+      - "{{ deploy_path }}/compose.yml"
+      - -f
+      - "{{ deploy_path }}/compose.prod.yml"
+  tasks:
+    - name: "🔎 Validate deployment settings"
+      ansible.builtin.assert:
+        that:
+          - romm_env.ROMM_LIBRARY_PATH.startswith('/')
+          - romm_env.ROMM_LIBRARY_PATH != '/'
+          - romm_env.ROMM_PORT | int > 0
+          - romm_env.ROMM_PORT | int < 65536
+          - romm_env.ROMM_AUTH_SECRET_KEY | length >= 32
+          - container_action in ['deploy', 'start', 'stop', 'restart']
+      no_log: true
+
+    - name: "🔐 Run Compose with secrets only in memory"
+      environment: "{{ romm_env }}"
+      no_log: true
+      block:
+        - name: "🔎 Validate production Compose"
+          ansible.builtin.command:
+            argv: "{{ compose_command + ['config', '--quiet'] }}"
+          changed_when: false
+
+        - name: "🔎 Find existing containers"
+          ansible.builtin.command:
+            argv: "{{ compose_command + ['ps', '--all', '--quiet'] }}"
+          register: containers
+          changed_when: false
+          when: container_action != 'deploy'
+
+        - name: "🔎 Require an existing deployment"
+          ansible.builtin.assert:
+            that:
+              - containers.stdout_lines | length == 2
+            fail_msg: Deploy RomM before managing containers.
+          when: container_action != 'deploy'
+
+        - name: "📦 Download specified image versions"
+          ansible.builtin.command:
+            argv: "{{ compose_command + ['pull'] }}"
+          when: container_action == 'deploy'
+          changed_when: true
+
+        - name: "🚀 Start or update containers without deleting volumes"
+          ansible.builtin.command:
+            argv: "{{ compose_command + ['up', '-d', '--wait', '--wait-timeout', '180'] }}"
+          when: container_action == 'deploy'
+          changed_when: true
+
+        - name: "⏹️ Stop containers and retain all data"
+          ansible.builtin.command:
+            argv: "{{ compose_command + ['stop'] }}"
+          when: container_action in ['stop', 'restart']
+          changed_when: true
+
+        - name: "▶️ Start existing containers"
+          ansible.builtin.command:
+            argv: "{{ compose_command + ['start', '--wait', '--wait-timeout', '180'] }}"
+          when: container_action in ['start', 'restart']
+          changed_when: true
+
+    - name: "💚 Wait for the RomM API"
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ romm_env.ROMM_PORT }}/api/heartbeat"
+        status_code: 200
+        return_content: false
+      register: health
+      until: health.status | default(0) == 200
+      retries: 60
+      delay: 2
+      when: container_action != 'stop'

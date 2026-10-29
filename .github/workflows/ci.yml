@@ -1,0 +1,39 @@
+name: "✅ CI"
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: "🔎 Check local and production Compose"
+        env:
+          ROMM_LIBRARY_PATH: /tmp/romm-library
+          ROMM_PORT: '8080'
+          ROMM_VERSION: '5.4.1'
+          MARIADB_VERSION: '11.4'
+          DB_NAME: romm
+          DB_USER: romm
+          DB_PASSWD: ci-only-password
+          DB_ROOT_PASSWD: ci-only-root-password
+          ROMM_AUTH_SECRET_KEY: ci-only-auth-key-not-for-deployment
+        run: |
+          mkdir -p "$ROMM_LIBRARY_PATH"
+          docker compose --env-file /dev/null -f compose.yml config --quiet
+          docker compose --env-file /dev/null -f compose.yml -f compose.prod.yml config --quiet
+      - name: "🔎 Check all Ansible playbooks"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ansible-core
+          for playbook in ansible/*.yml; do
+            ansible-playbook -i localhost, -c local "$playbook" --syntax-check
+          done

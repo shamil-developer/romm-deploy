@@ -1,0 +1,26 @@
+name: "⏯️ 4. Manage containers"
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Container action (keeps games, database and saves)
+        required: true
+        type: choice
+        default: start
+        options:
+          - start
+          - stop
+          - restart
+
+permissions:
+  contents: read
+
+jobs:
+  manage:
+    name: "⏯️ ${{ inputs.action }} RomM"
+    uses: ./.github/workflows/run-ansible.yml
+    with:
+      operation: deploy
+      container_action: ${{ inputs.action }}
+    secrets: inherit
