@@ -1,4 +1,6 @@
-.PHONY: up down logs pull doctor check env
+.PHONY: up down logs pull doctor check env tunnel
+
+export HOST LOCAL_PORT REMOTE_PORT
 
 LOAD_ENV = set -e; set -a; . ./.env; set +a;
 COMPOSE = $(LOAD_ENV) docker compose --env-file /dev/null
@@ -19,6 +21,14 @@ pull: check
 
 doctor: check
 	@docker info --format 'Docker {{.ServerVersion}}: OK'
+
+tunnel:
+	@for field in HOST LOCAL_PORT REMOTE_PORT; do \
+	    test -n "$$(printenv "$$field")" || { echo "Missing $$field. Pass HOST, LOCAL_PORT and REMOTE_PORT explicitly." >&2; exit 1; }; \
+	done
+	@echo "Open http://localhost:$$LOCAL_PORT — keep this terminal open; Ctrl+C closes the tunnel."
+	@ssh -N -T -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+	    -L "127.0.0.1:$$LOCAL_PORT:127.0.0.1:$$REMOTE_PORT" -- "$$HOST"
 
 check: env
 	@$(LOAD_ENV) \
